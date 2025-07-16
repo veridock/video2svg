@@ -7,7 +7,7 @@ extraction:
 # Ustawienia przetwarzania
 processing:
   output_width: 640      # Szerokość wyjściowa
-  output_height: 480     # Wysokość wyjściowa (null = zachowaj proporcje)
+  #output_height: null     # Wysokość wyjściowa (null = zachowaj proporcje)
   compression_level: 8   # Kompresja PNG (0-9)
   color_mode: 'color'    # 'color', 'grayscale', 'monochrome'
 

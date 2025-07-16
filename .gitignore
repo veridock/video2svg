@@ -1,5 +1,6 @@
 .idea
 venv
+poetry.lock
 *.mp4
 *.svg
 *.mp3

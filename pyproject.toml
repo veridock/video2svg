@@ -21,6 +21,9 @@ dependencies = [
     "numpy",
     "svgwrite",
     "PyYAML",
+    "pytesseract",    # For OCR text extraction
+    "gTTS",          # Google Text-to-Speech
+    "pillow",        # Required for image processing with OCR
 ]
 requires-python = ">=3.7"
 
