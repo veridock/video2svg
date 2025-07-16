@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Video to SVG Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #output {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 Video to SVG Converter</h1>
+    
+    <div class="upload-area">
+        <input type="file" id="videoFile" accept="video/*">
+        <p>lub</p>
+        <input type="text" id="rtspUrl" placeholder="rtsp://example.com/stream">
+    </div>
+    
+    <button onclick="convert()">Konwertuj do SVG</button>
+    
+    <div id="output"></div>
+    
+    <script src="app.js"></script>
+</body>
+</html>

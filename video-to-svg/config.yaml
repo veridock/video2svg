@@ -1,0 +1,28 @@
+# Ustawienia ekstrakcji klatek
+extraction:
+  frame_interval: 30      # Co która klatka (30 = 1fps dla 30fps video)
+  start_time: 0          # Czas rozpoczęcia (sekundy)
+  end_time: null         # Czas zakończenia (null = do końca)
+
+# Ustawienia przetwarzania
+processing:
+  output_width: 640      # Szerokość wyjściowa
+  output_height: 480     # Wysokość wyjściowa (null = zachowaj proporcje)
+  compression_level: 8   # Kompresja PNG (0-9)
+  color_mode: 'color'    # 'color', 'grayscale', 'monochrome'
+
+# Ustawienia SVG
+svg:
+  output_fps: 1          # FPS animacji w SVG
+  optimization: true     # Optymalizacja rozmiaru
+  embed_method: 'base64' # 'base64' lub 'path' (wektoryzacja)
+  animation_type: 'smil' # 'smil' lub 'css'
+
+# Ustawienia zaawansowane
+advanced:
+  vectorize: false       # Wektoryzacja przez Potrace
+  vectorize_threshold: 128  # Próg dla wektoryzacji
+  max_file_size: 100    # Max rozmiar w MB (ostrzeżenie)
+  use_cache: true       # Cache przetworzonych klatek
+  parallel_processing: true  # Przetwarzanie równoległe
+  num_workers: 4        # Liczba workerów
