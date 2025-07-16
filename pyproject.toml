@@ -36,4 +36,4 @@ where = ["."]
 include = ["video2svg*"]
 
 [project.scripts]
-video2svg = "video2svg.main:main"
+video2svg = "video2svg.cli:main"

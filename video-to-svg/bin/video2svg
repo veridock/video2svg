@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-CLI wrapper for video2svg converter
+Command line interface for video2svg converter
 """
 
 import sys
 import os
 import argparse
 
-# Ensure we can import from the top-level `src` directory when the package is installed in editable mode
-PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-SRC_PATH = os.path.join(PACKAGE_ROOT, 'src')
-if SRC_PATH not in sys.path:
-    sys.path.insert(0, SRC_PATH)
+# Add parent directory to path so we can import from src
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from video2svg.converter import VideoToSVGConverter, create_default_config
+from src.converter import VideoToSVGConverter, create_default_config
 
 
 def main():
@@ -55,12 +52,12 @@ def main():
     try:
         converter = VideoToSVGConverter(config)
         result = converter.convert(args.input, args.output)
-        print(f" Conversion completed: {args.output}")
+        print(f"✅ Conversion completed: {args.output}")
         print(f"   Size: {result['size'] / 1024:.1f} KB")
         print(f"   Frames: {result['frames_count']}")
         print(f"   Duration: {result['duration']:.1f}s")
     except Exception as e:
-        print(f" Error: {e}", file=sys.stderr)
+        print(f"❌ Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
