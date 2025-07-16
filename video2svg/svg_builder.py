@@ -1,7 +1,8 @@
 # src/svg_builder.py
 """
 Moduł odpowiedzialny za budowanie animowanych plików SVG z klatek wideo.
-Obsługuje różne metody animacji (SMIL, CSS) i optymalizację rozmiaru.
+Obsługuje różne metody animacji (SMIL, CSS, JavaScript), optymalizację rozmiaru,
+zachowanie proporcji, oraz osadzanie rozpoznanego tekstu z funkcją TTS.
 """
 
 import base64
@@ -18,6 +19,9 @@ import gzip
 import logging
 from io import BytesIO
 import xml.etree.ElementTree as ET
+import html
+import uuid
+import os
 
 # Konfiguracja loggera
 logger = logging.getLogger(__name__)
@@ -43,6 +47,10 @@ class SVGAnimation:
     autoplay: bool = True
     controls: bool = False
     optimization_level: str = 'medium'  # 'none', 'low', 'medium', 'high'
+    preserve_aspect_ratio: bool = True  # Zachowaj proporcje obrazu
+    show_text: bool = True  # Pokaż rozpoznany tekst w SVG
+    show_audio_button: bool = True  # Pokaż przycisk do odtwarzania audio
+    show_text_button: bool = True  # Pokaż przycisk do pobrania tekstu
 
 
 class SVGBuilder:
@@ -67,7 +75,7 @@ class SVGBuilder:
     def build_animated_svg(self,
                           frames: List[Union[np.ndarray, str]],
                           width: int = 640,
-                          height: int = 480,
+                          height: Optional[int] = None,
                           animation: Optional[SVGAnimation] = None,
                           metadata: Optional[Dict[str, Any]] = None) -> str:
         """
@@ -76,7 +84,7 @@ class SVGBuilder:
         Args:
             frames: Lista klatek (numpy arrays lub base64 strings)
             width: Szerokość SVG
-            height: Wysokość SVG
+            height: Wysokość SVG (jeśli None i preserve_aspect_ratio=True, zostanie obliczona)
             animation: Konfiguracja animacji
             metadata: Dodatkowe metadane
             
@@ -85,6 +93,20 @@ class SVGBuilder:
         """
         animation = animation or SVGAnimation()
         metadata = metadata or {}
+        
+        # Oblicz wysokość jeśli nie została podana (zachowanie proporcji)
+        if height is None and frames and animation.preserve_aspect_ratio:
+            # Weź pierwszą klatkę jako referencję do wymiarów
+            if isinstance(frames[0], np.ndarray):
+                # To są ramki NumPy
+                aspect_ratio = frames[0].shape[0] / frames[0].shape[1]
+                height = int(width * aspect_ratio)
+            else:
+                # Domyślnie 4:3
+                height = int(width * 0.75)
+        # Jeśli nadal nie mamy wysokości, użyj domyślnej wartości
+        if height is None:
+            height = 480
         
         logger.info(f"Budowanie SVG: {len(frames)} klatek, {width}x{height}, animacja: {animation.type}")
         
@@ -100,6 +122,22 @@ class SVGBuilder:
             svg_content = self._build_javascript_animation(svg_frames, width, height, animation)
         else:
             raise ValueError(f"Nieznany typ animacji: {animation.type}")
+        
+        # Dodaj rozpoznany tekst jako element <text> w formacie kopiowanym
+        extracted_text = metadata.get('extracted_text', '')
+        if animation.show_text and extracted_text:
+            # Utwórz element <foreignObject> dla tekstu
+            svg_content = self._add_text_element_to_svg(svg_content, extracted_text, width, height)
+            
+        # Dodaj przyciski do audio i tekstu jeśli są dostępne
+        audio_file = metadata.get('audio_file')
+        text_file = metadata.get('text_file')
+        
+        if animation.show_audio_button and audio_file:
+            svg_content = self._add_audio_button_to_svg(svg_content, audio_file, width, height)
+            
+        if animation.show_text_button and (text_file or extracted_text):
+            svg_content = self._add_text_download_button_to_svg(svg_content, text_file, extracted_text, width, height)
         
         # Dodaj metadane
         if metadata:
@@ -801,25 +839,121 @@ class SVGBuilder:
         
         return svg_content
     
-    def _add_metadata(self, svg_content: str, metadata: Dict[str, Any]) -> str:
-        """
-        Dodaje metadane do SVG.
-        """
-        # Parse SVG
-        root = ET.fromstring(svg_content)
+    def _add_metadata(self, svg_content, metadata):
+        """Dodaje metadane do SVG"""
+        # Dodaj metadane w sekcji <metadata>
+        metadata_tag = f'<metadata>{json.dumps(metadata)}</metadata>'
+        svg_content = svg_content.replace('</svg>', f'{metadata_tag}\n</svg>')
+        return svg_content
         
-        # Utwórz element metadata
-        metadata_elem = ET.Element('metadata')
+    def _add_text_element_to_svg(self, svg_content, text, width, height):
+        """Dodaj rozpoznany tekst jako kopiowalna zawartość w SVG"""
+        if not text:
+            return svg_content
+            
+        # Utworzenie ID dla elementu tekstu
+        text_id = f"ocr-text-{str(uuid.uuid4())[:8]}"
         
-        # Dodaj informacje
-        desc = ET.SubElement(metadata_elem, 'desc')
-        desc.text = json.dumps(metadata, indent=2)
+        # Dodaj style dla obszaru tekstu
+        style_tag = f"""<style type="text/css">            
+            #{text_id} {{
+                font-family: Arial, sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+                padding: 10px;
+                background-color: rgba(255,255,255,0.8);
+                border-radius: 5px;
+                max-height: 150px;
+                overflow-y: auto;
+                margin: 10px;
+                white-space: pre-wrap;
+                user-select: text;
+            }}
+        </style>"""
         
-        # Wstaw na początku
-        root.insert(0, metadata_elem)
+        # Dodaj element foreignObject dla tekstu HTML
+        foreign_obj = f"""<foreignObject x="10" y="10" width="{width - 20}" height="150">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+                <div id="{text_id}">{html.escape(text)}</div>
+            </body>
+        </foreignObject>"""
         
-        return ET.tostring(root, encoding='unicode')
-    
+        # Wstaw style i element tekstu przed zakończeniem SVG
+        svg_content = svg_content.replace('</svg>', f'{style_tag}\n{foreign_obj}\n</svg>')
+        
+        return svg_content
+        
+    def _add_audio_button_to_svg(self, svg_content, audio_file, width, height):
+        """Dodaj przycisk do odtwarzania pliku audio"""
+        if not audio_file:
+            return svg_content
+            
+        # Utworzenie ID dla przycisku i odtwarzacza audio
+        button_id = f"audio-button-{str(uuid.uuid4())[:8]}"
+        audio_id = f"audio-player-{str(uuid.uuid4())[:8]}"
+        
+        # Uzyskaj ścieżkę względną do pliku audio
+        audio_rel_path = os.path.basename(audio_file)
+        
+        # Dodaj element audio do dokumentu
+        audio_element = f"<audio id=\"{audio_id}\" style=\"display:none;\"><source src=\"{audio_rel_path}\" type=\"audio/mp3\"></audio>"
+        
+        # Dodaj przycisk do odtwarzania audio
+        play_script = f"document.getElementById('{audio_id}').play();"
+        
+        button_element = f"""<g id="{button_id}">
+            <rect x="{width - 160}" y="10" width="150" height="40" rx="5" ry="5" 
+                  fill="#4CAF50" stroke="#388E3C" stroke-width="1" 
+                  onclick="{play_script}" style="cursor: pointer;"/>
+            <text x="{width - 85}" y="35" text-anchor="middle" 
+                  font-size="14" font-family="Arial" fill="white" 
+                  onclick="{play_script}" style="cursor: pointer;">Odtwórz audio</text>
+        </g>"""
+        
+        # Wstaw elementy przed zakończeniem SVG
+        svg_content = svg_content.replace('</svg>', f'{audio_element}\n{button_element}\n</svg>')
+        
+        return svg_content
+        
+    def _add_text_download_button_to_svg(self, svg_content, text_file, text_content, width, height):
+        """Dodaj przycisk do pobierania tekstu"""
+        button_id = f"text-button-{str(uuid.uuid4())[:8]}"
+        
+        # Utwórz script do pobierania tekstu
+        if text_file:
+            # Jeśli mamy plik tekstowy, dodaj link do niego
+            text_rel_path = os.path.basename(text_file)
+            download_script = f"window.location.href='{text_rel_path}';"
+        else:
+            # Jeśli nie mamy pliku, ale mamy zawartość tekstową, utwórz dynamiczny link
+            escaped_content = html.escape(text_content or "").replace("'", "&#39;")
+            download_script = f"""
+                const blob = new Blob(['{escaped_content}'], {{type: 'text/plain'}});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'extracted_text.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            """
+        
+        # Dodaj przycisk do pobierania tekstu
+        button_element = f"""<g id="{button_id}">
+            <rect x="{width - 160}" y="60" width="150" height="40" rx="5" ry="5" 
+                  fill="#2196F3" stroke="#1565C0" stroke-width="1" 
+                  onclick="{download_script}" style="cursor: pointer;"/>
+            <text x="{width - 85}" y="85" text-anchor="middle" 
+                  font-size="14" font-family="Arial" fill="white" 
+                  onclick="{download_script}" style="cursor: pointer;">Pobierz tekst</text>
+        </g>"""
+        
+        # Wstaw przycisk przed zakończeniem SVG
+        svg_content = svg_content.replace('</svg>', f'{button_element}\n</svg>')
+        
+        return svg_content
+        
     def _load_templates(self) -> Dict[str, str]:
         """
         Ładuje szablony SVG.

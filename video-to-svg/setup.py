@@ -13,7 +13,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "video2svg=cli:main",
+            "video2svg=video2svg.cli:main",
         ],
     },
     python_requires=">=3.6",
