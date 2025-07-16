@@ -8,13 +8,14 @@ import base64
 import numpy as np
 from pathlib import Path
 import svgwrite
-from typing import List, Optional, Callable, Dict, Any
+from typing import List, Optional, Callable, Dict, Any, Tuple
 import logging
 from datetime import datetime
 import tempfile
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
+from .text_processor import TextProcessor
 
 # Konfiguracja loggera
 logging.basicConfig(level=logging.INFO)
@@ -50,18 +51,22 @@ class VideoToSVGConverter:
         converter.convert('input.mp4', 'output.svg')
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any] = None):
         """
         Inicjalizacja konwertera
 
         Args:
             config: Słownik z konfiguracją
         """
-        self.config = self._validate_config(config)
+        self.config = self._validate_config(config or {})
         self.frames = []
         self.temp_dir = None
         self.rtsp_timeout = 10
         self.rtsp_retries = 3
+        self.text_processor = TextProcessor()
+        self.extracted_text = ""
+        self.text_file_path = None
+        self.audio_file_path = None
 
     def _validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Walidacja i uzupełnienie domyślnych wartości konfiguracji"""
@@ -90,6 +95,17 @@ class VideoToSVGConverter:
                 'use_cache': True,
                 'parallel_processing': True,
                 'num_workers': 4
+            },
+            'ocr': {
+                'enabled': True,
+                'lang': 'pol+eng',
+                'min_confidence': 60
+            },
+            'tts': {
+                'enabled': True,
+                'lang': 'pl',
+                'save_text': True,
+                'save_audio': True
             }
         }
 
@@ -137,7 +153,25 @@ class VideoToSVGConverter:
             if not frames:
                 raise ConversionError("Nie udało się wyekstraktować żadnych klatek")
 
-            # 2. Przetwarzanie klatek (opcjonalne)
+            # 2. Ekstrakcja tekstu z klatek (jeśli włączona)
+            raw_frames = [frame for frame in frames]  # Zachowaj kopie klatek dla OCR
+            
+            if self.config['ocr']['enabled']:
+                self._update_progress(progress_callback, 30, "Ekstraktuję tekst z klatek...")
+                self.extracted_text = self.extract_text_from_video(raw_frames)
+                
+                # Zapisz plik tekstowy i audio jeśli włączone
+                if self.config['tts']['save_text'] and self.extracted_text:
+                    text_path = os.path.splitext(output_path)[0] + ".txt"
+                    self.text_file_path = self.text_processor.save_text_file(self.extracted_text, text_path)
+                
+                if self.config['tts']['enabled'] and self.extracted_text:
+                    audio_path = os.path.splitext(output_path)[0] + ".mp3"
+                    self.audio_file_path = self.text_processor.text_to_speech(
+                        self.extracted_text, audio_path, self.config['tts']['lang']
+                    )
+            
+            # 3. Przetwarzanie klatek (opcjonalne)
             if self.config['advanced']['vectorize']:
                 self._update_progress(progress_callback, 40, "Wektoryzuję klatki...")
                 frames = self.vectorize_frames(frames)
@@ -165,7 +199,7 @@ class VideoToSVGConverter:
 
             duration = (datetime.now() - start_time).total_seconds()
 
-            return {
+            result = {
                 'status': 'success',
                 'output_file': output_path,
                 'size': output_size,
@@ -173,6 +207,18 @@ class VideoToSVGConverter:
                 'frames_count': len(frames),
                 'fps': self.config['svg']['output_fps']
             }
+            
+            # Dodaj informacje o plikach tekstowych i audio jeśli zostały wygenerowane
+            if self.text_file_path:
+                result['text_file'] = self.text_file_path
+                
+            if self.audio_file_path:
+                result['audio_file'] = self.audio_file_path
+                
+            if self.extracted_text:
+                result['extracted_text'] = self.extracted_text[:500] + '...' if len(self.extracted_text) > 500 else self.extracted_text
+                
+            return result
 
         except Exception as e:
             logger.error(f"Błąd podczas konwersji: {e}")
@@ -445,13 +491,62 @@ class VideoToSVGConverter:
 
         return output_path.stat().st_size
 
-    def _update_progress(self, callback: Optional[Callable],
-                         percent: int, message: str):
-        """Aktualizuje postęp jeśli podano callback"""
+    def _update_progress(self, callback, percent, message):
+        """Aktualizuje postęp przez callback"""
         if callback:
             callback(percent, message)
-        logger.info(f"[{percent}%] {message}")
 
+    def extract_text_from_video(self, frames):
+        """Ekstraktuje tekst z klatek wideo używając OCR"""
+        if not frames:
+            return ""
+            
+        # Używamy TextProcessor do ekstrakcji tekstu
+        return self.text_processor.extract_text_from_frames(frames)
+        
+    def convert_video_to_svg(self, video_path, width=640, height=None, animation=None, metadata=None):
+        """Konwertuje wideo do SVG z zachowaniem proporcji i opcją ekstrakcji tekstu"""
+        from .svg_builder import SVGBuilder, SVGAnimation
+        
+        # Ustaw konfigurację na podstawie parametrów
+        if width:
+            self.config['processing']['output_width'] = width
+        if height:
+            self.config['processing']['output_height'] = height
+            
+        # Ekstraktuj klatki
+        frames = self.extract_frames(video_path)
+        
+        if not frames:
+            raise ConversionError("Nie udało się wyekstraktować żadnych klatek")
+            
+        # Ekstraktuj tekst jeśli włączono OCR
+        if self.config['ocr']['enabled']:
+            self.extracted_text = self.extract_text_from_video(frames)
+            
+        # Ustaw animację
+        if animation is None:
+            animation = SVGAnimation()
+        
+        # Buduj SVG
+        builder = SVGBuilder()
+        svg_content = builder.build_animated_svg(
+            frames, 
+            width=self.config['processing']['output_width'],
+            height=self.config['processing']['output_height'],
+            animation=animation,
+            metadata={
+                'source': video_path,
+                'extracted_text': self.extracted_text,
+                'has_audio': self.config['tts']['enabled'],
+                'has_text_file': self.config['tts']['save_text'],
+                **(metadata or {})
+            }
+        )
+        
+        return svg_content
+
+    # ...
 
 # Funkcje pomocnicze
 def load_config(config_path: str) -> Dict[str, Any]:
